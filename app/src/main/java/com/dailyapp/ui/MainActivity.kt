@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
@@ -23,6 +24,8 @@ import com.dailyapp.data.AppDatabase
 
 class MainActivity : ComponentActivity() {
     private var tab by mutableIntStateOf(TAB_TODO)
+    /** 從其他 App 分享進來、尚未處理的文字。 */
+    private var sharedText by mutableStateOf<String?>(null)
     /** onResume 時遞增，讓健康檢查頁重新讀取權限狀態。 */
     private var resumeTick by mutableIntStateOf(0)
 
@@ -35,6 +38,7 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         tab = intent.getIntExtra(EXTRA_TAB, TAB_TODO)
+        readShare(intent)
         val db = AppDatabase.get(this)
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -47,7 +51,7 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize()) {
                     Box(Modifier.weight(1f)) {
                         when (tab) {
-                            TAB_TODO -> TodoScreen(db)
+                            TAB_TODO -> TodoScreen(db, sharedText, onSharedConsumed = { sharedText = null })
                             TAB_GROUPS -> GroupScreen(db)
                             else -> HealthScreen(resumeTick, onAskNotify = {
                                 askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -67,6 +71,14 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         tab = intent.getIntExtra(EXTRA_TAB, tab)
+        readShare(intent)
+    }
+
+    private fun readShare(intent: Intent) {
+        if (intent.action != Intent.ACTION_SEND || intent.type?.startsWith("text/") != true) return
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() } ?: return
+        sharedText = text
+        tab = TAB_TODO
     }
 
     override fun onResume() {

@@ -47,7 +47,8 @@ data class Todo(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val kind: TodoKind,
     val title: String,
-    val groupId: String,
+    /** 來源群組；手動新增或分享進來的待辦為 null。 */
+    val groupId: String?,
     val requester: String?,
     val dueAt: Long?,
     val priority: Priority,
@@ -63,6 +64,6 @@ data class Todo(
 
 data class TodoRow(
     @Embedded val todo: Todo,
-    val groupTitle: String,
-    val platform: String,
+    val groupTitle: String?,
+    val platform: String?,
 )

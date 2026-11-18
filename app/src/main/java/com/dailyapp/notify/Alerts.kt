@@ -12,7 +12,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.dailyapp.R
 import com.dailyapp.core.Platform
+import com.dailyapp.core.ReminderPlanner
 import com.dailyapp.data.ChatGroup
+import com.dailyapp.data.Todo
 import com.dailyapp.ui.MainActivity
 
 /** 本 App 發出的提醒。見 spec.md 5.4 通知管道。 */
@@ -54,7 +56,68 @@ object Alerts {
         )
     }
 
-    private fun post(ctx: Context, id: Int, channel: String, title: String, text: String, tab: Int) {
+    fun todoNotificationId(todoId: Long) = ("todo:$todoId").hashCode()
+
+    /** 每日摘要：列出未完成待辦。沒有待辦時不打擾。 */
+    fun digest(ctx: Context, todos: List<Todo>) {
+        if (todos.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val style = NotificationCompat.InboxStyle()
+        todos.take(6).forEach { t ->
+            val due = ReminderPlanner.dueLabel(t.dueAt, now, Reminders.zone)
+                ?: t.dueAt?.let { "截止 " + fmt(it) }
+            style.addLine(if (due != null) "${t.title}（$due）" else t.title)
+        }
+        if (todos.size > 6) style.setSummaryText("另有 ${todos.size - 6} 項")
+        post(
+            ctx, id = DIGEST_ID, channel = CH_GENERAL,
+            title = "未完成待辦 ${todos.size} 項",
+            text = todos.first().title,
+            tab = MainActivity.TAB_TODO,
+            style = style,
+        )
+    }
+
+    /** 單筆待辦的截止提醒，附「延後 1 小時／明天再提醒／完成」。今天截止或逾期走緊急管道。 */
+    fun todoReminder(ctx: Context, t: Todo) {
+        val now = System.currentTimeMillis()
+        val label = ReminderPlanner.dueLabel(t.dueAt, now, Reminders.zone) ?: "提醒"
+        val urgent = ReminderPlanner.isUrgent(t.dueAt, now, Reminders.zone)
+        val detail = buildString {
+            t.dueAt?.let { append("截止 ").append(fmt(it)) }
+            if (t.excerpt.isNotBlank() && t.excerpt != t.title) {
+                if (isNotEmpty()) append("\n")
+                append(t.excerpt)
+            }
+        }
+        post(
+            ctx, id = todoNotificationId(t.id), channel = if (urgent) CH_URGENT else CH_GENERAL,
+            title = "$label｜${t.title}",
+            text = detail.ifBlank { t.title },
+            tab = MainActivity.TAB_TODO,
+            actions = listOf(
+                "延後 1 小時" to Reminders.broadcast(ctx, Reminders.ACTION_SNOOZE_HOUR, 1, t.id),
+                "明天再提醒" to Reminders.broadcast(ctx, Reminders.ACTION_SNOOZE_TOMORROW, 2, t.id),
+                "完成" to Reminders.broadcast(ctx, Reminders.ACTION_DONE, 3, t.id),
+            ),
+        )
+    }
+
+    private const val DIGEST_ID = 0x0D16E57
+
+    private fun fmt(ts: Long) =
+        java.text.SimpleDateFormat("M/d HH:mm", java.util.Locale.TAIWAN).format(java.util.Date(ts))
+
+    private fun post(
+        ctx: Context,
+        id: Int,
+        channel: String,
+        title: String,
+        text: String,
+        tab: Int,
+        style: NotificationCompat.Style? = null,
+        actions: List<Pair<String, PendingIntent>> = emptyList(),
+    ) {
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) return
@@ -62,15 +125,15 @@ object Alerts {
             .putExtra(MainActivity.EXTRA_TAB, tab)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pi = PendingIntent.getActivity(ctx, id, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = NotificationCompat.Builder(ctx, channel)
+        val b = NotificationCompat.Builder(ctx, channel)
             .setSmallIcon(R.drawable.ic_notify)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setStyle(style ?: NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setCategory(if (channel == CH_URGENT) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
-            .build()
-        NotificationManagerCompat.from(ctx).notify(id, n)
+        actions.forEach { (label, action) -> b.addAction(0, label, action) }
+        NotificationManagerCompat.from(ctx).notify(id, b.build())
     }
 }

@@ -28,8 +28,16 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.dailyapp.core.Platform
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.dailyapp.core.ReminderPlanner
 import com.dailyapp.data.HealthStore
+import com.dailyapp.notify.Alerts
 import com.dailyapp.notify.ChatListenerService
+import com.dailyapp.notify.ReminderSettings
+import com.dailyapp.notify.Reminders
+import java.time.LocalTime
 
 private const val STALE_MS = 6 * 60 * 60 * 1000L
 
@@ -81,6 +89,8 @@ fun HealthScreen(tick: Int, onAskNotify: () -> Unit) {
             }
         }
 
+        ReminderSection(ctx, tick)
+
         SectionLabel("通訊 App")
         Rule()
         for (pl in Platform.entries) {
@@ -129,6 +139,61 @@ private fun PlatformBlock(ctx: Context, pl: Platform, health: HealthStore, now: 
             PlainAction("通知設定") { openAppNotificationSettings(ctx, installed) }
             PlainAction("App 資訊") { openAppDetails(ctx, installed) }
         }
+    }
+}
+
+@Composable
+private fun ReminderSection(ctx: Context, tick: Int) {
+    val settings = remember { ReminderSettings(ctx) }
+    var times by remember { mutableStateOf(settings.digestTimes) }
+    val exact = remember(tick) { Reminders.canExact(ctx) }
+
+    fun save(newTimes: List<LocalTime>) {
+        settings.digestTimes = newTimes
+        times = settings.digestTimes
+        Reminders.scheduleDigest(ctx)
+    }
+
+    // 正在編輯的時間：null 表示沒開對話框
+    var editing by remember { mutableStateOf<Pair<LocalTime, (LocalTime) -> Unit>?>(null) }
+    fun pick(initial: LocalTime, onPicked: (LocalTime) -> Unit) { editing = initial to onPicked }
+    editing?.let { (initial, onPicked) ->
+        TimeWheelDialog(
+            title = "每日摘要時間",
+            initial = initial,
+            onDismiss = { editing = null },
+            onConfirm = { editing = null; onPicked(it) },
+        )
+    }
+
+    SectionLabel("提醒")
+    Rule()
+    KeyValue("準時提醒（精確鬧鐘）", if (exact) "可用" else "不可用，提醒可能延遲", emphasize = !exact)
+    Text(
+        "每日摘要",
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(horizontal = Space.Page).padding(top = 6.dp),
+    )
+    Row(Modifier.padding(horizontal = Space.Page), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+        times.forEach { t ->
+            PlainAction(t.toString()) { pick(t) { picked -> save(times - t + picked) } }
+        }
+        PlainAction("＋") { pick(LocalTime.of(12, 0)) { save(times + it) } }
+    }
+    Note(
+        "點時間可修改。截止前一天與當天，會在第一個時間（${times.firstOrNull() ?: "09:00"}）提醒。\n" +
+            "若要讓「被點名、今天截止」在勿擾模式下也響，請在下方開啟「覆寫勿擾」。"
+    )
+    Row(Modifier.padding(horizontal = Space.Page), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+        PlainAction("緊急提醒設定") {
+            ctx.startActivity(
+                Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, Alerts.CH_URGENT)
+            )
+        }
+        if (times.size > 1) PlainAction("移除最後一個") { save(times.dropLast(1)) }
+        PlainAction("恢復預設") { save(ReminderPlanner.parseTimes(ReminderSettings.DEFAULT)) }
     }
 }
 

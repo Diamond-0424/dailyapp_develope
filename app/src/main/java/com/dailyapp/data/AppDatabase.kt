@@ -7,6 +7,8 @@ import android.util.Base64
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -15,7 +17,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-@Database(entities = [ChatGroup::class, RawMessage::class, Todo::class], version = 1, exportSchema = false)
+@Database(entities = [ChatGroup::class, RawMessage::class, Todo::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun groups(): GroupDao
     abstract fun messages(): MessageDao
@@ -33,7 +35,28 @@ abstract class AppDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(DbKey.passphrase(ctx))
             return Room.databaseBuilder(ctx, AppDatabase::class.java, "dailyapp.db")
                 .openHelperFactory(factory)
+                .addMigrations(MIGRATION_1_2)
                 .build()
+        }
+
+        /** v2：todos.groupId 改為可為 null（手動新增、分享進來的待辦沒有來源群組）。保留既有資料。 */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val cols = "`id`, `kind`, `title`, `groupId`, `requester`, `dueAt`, `priority`, `status`, " +
+                    "`excerpt`, `sourceMessageIds`, `hasAttachment`, `createdAt`, `updatedAt`, `snoozedUntil`"
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `todos_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, `title` TEXT NOT NULL, `groupId` TEXT, `requester` TEXT, " +
+                        "`dueAt` INTEGER, `priority` TEXT NOT NULL, `status` TEXT NOT NULL, `excerpt` TEXT NOT NULL, " +
+                        "`sourceMessageIds` TEXT NOT NULL, `hasAttachment` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `snoozedUntil` INTEGER)"
+                )
+                db.execSQL("INSERT INTO `todos_new` ($cols) SELECT $cols FROM `todos`")
+                db.execSQL("DROP TABLE `todos`")
+                db.execSQL("ALTER TABLE `todos_new` RENAME TO `todos`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_todos_groupId` ON `todos` (`groupId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_todos_status` ON `todos` (`status`)")
+            }
         }
     }
 }
