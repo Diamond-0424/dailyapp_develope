@@ -50,5 +50,9 @@ dependencies {
     implementation("net.zetetic:sqlcipher-android:4.20.0")
     implementation("androidx.sqlite:sqlite:2.7.1")
 
+    // AI 整理（M2）
+    implementation("com.anthropic:anthropic-java:3.3.0")
+    implementation("androidx.work:work-runtime-ktx:2.11.0")
+
     testImplementation("junit:junit:4.13.2")
 }

@@ -31,6 +31,9 @@ interface GroupDao {
 
     @Query("SELECT COUNT(*) FROM chat_groups WHERE state = 'NEW'")
     fun observeNewCount(): Flow<Int>
+
+    @Query("SELECT * FROM chat_groups WHERE state = 'ENABLED'")
+    suspend fun enabled(): List<ChatGroup>
 }
 
 @Dao
@@ -44,6 +47,22 @@ interface MessageDao {
 
     @Query("SELECT COUNT(*) FROM raw_messages")
     fun observeCount(): Flow<Int>
+
+    /** 待 AI 整理的訊息：只取目前仍在監聽的群組。 */
+    @Query(
+        "SELECT m.* FROM raw_messages m JOIN chat_groups g ON g.id = m.groupId " +
+            "WHERE m.processedAt IS NULL AND g.state = 'ENABLED' ORDER BY m.postedAt LIMIT :limit"
+    )
+    suspend fun unprocessed(limit: Int): List<RawMessage>
+
+    @Query(
+        "SELECT COUNT(*) FROM raw_messages m JOIN chat_groups g ON g.id = m.groupId " +
+            "WHERE m.processedAt IS NULL AND g.state = 'ENABLED'"
+    )
+    fun observeUnprocessedCount(): Flow<Int>
+
+    @Query("UPDATE raw_messages SET processedAt = :now WHERE id IN (:ids)")
+    suspend fun markProcessed(ids: List<Long>, now: Long)
 }
 
 @Dao
@@ -104,6 +123,9 @@ interface RoleDao {
 
     @Query("SELECT * FROM group_roles")
     fun observeLinks(): Flow<List<GroupRole>>
+
+    @Query("SELECT * FROM group_roles")
+    suspend fun links(): List<GroupRole>
 
     @Query("SELECT r.* FROM roles r JOIN group_roles gr ON gr.roleId = r.id WHERE gr.groupId = :groupId ORDER BY r.name")
     suspend fun rolesOf(groupId: String): List<Role>

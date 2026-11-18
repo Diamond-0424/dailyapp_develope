@@ -86,6 +86,8 @@ data class Todo(
     val createdAt: Long,
     val updatedAt: Long,
     val snoozedUntil: Long? = null,
+    /** 標題或內容由 AI 整理產生，介面上顯示「AI」標籤。 */
+    @ColumnInfo(defaultValue = "0") val aiGenerated: Boolean = false,
 )
 
 data class TodoRow(

@@ -1,6 +1,8 @@
 package com.dailyapp.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,9 +27,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dailyapp.ai.AiAssist
 import com.dailyapp.core.Platform
+import com.dailyapp.data.AiStore
 import com.dailyapp.core.parseNames
 import com.dailyapp.data.AppDatabase
 import com.dailyapp.data.ChatGroup
@@ -239,17 +244,58 @@ private fun RoleDialog(role: Role, onDismiss: () -> Unit, onSave: (Role) -> Unit
     var desc by remember { mutableStateOf(role.description) }
     var keywords by remember { mutableStateOf(role.keywords) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val hasKey = remember { AiStore(ctx).hasKey }
+    var suggesting by remember { mutableStateOf(false) }
+    var suggestError by remember { mutableStateOf<String?>(null) }
+    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(4.dp),
         containerColor = Ink.White,
         title = { Text(if (role.id == 0L) "新增身分" else "編輯身分", style = MaterialTheme.typography.titleLarge) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 InkField(name, { name = it }, "名稱，例如：美宣")
                 InkField(desc, { desc = it }, "職責描述，例如：負責海報與社群貼文設計", singleLine = false)
                 InkField(keywords, { keywords = it }, "關鍵字，以逗號分隔", singleLine = false)
                 Text("關鍵字只是給 AI 的提示，不會用來過濾訊息。", style = MaterialTheme.typography.bodySmall)
+                if (hasKey && name.isNotBlank()) PlainAction(if (suggesting) "AI 思考中…" else "AI 建議關鍵字") {
+                    if (suggesting) return@PlainAction
+                    suggesting = true
+                    suggestError = null
+                    scope.launch {
+                        AiAssist.suggestKeywords(ctx, name.trim(), desc.trim(), parseNames(keywords))
+                            .onSuccess { suggestions = it; picked = it.toSet() }
+                            .onFailure { suggestError = it.message }
+                        suggesting = false
+                    }
+                }
+                suggestError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                if (suggestions.isNotEmpty()) {
+                    suggestions.forEach { kw ->
+                        val on = kw in picked
+                        Row(
+                            Modifier.fillMaxWidth().clickable { picked = if (on) picked - kw else picked + kw },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = on,
+                                onCheckedChange = { picked = if (it) picked + kw else picked - kw },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Ink.Black, uncheckedColor = Ink.Secondary, checkmarkColor = Ink.White,
+                                ),
+                            )
+                            Text(kw, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                    PlainAction("加入勾選的 ${picked.size} 個") {
+                        keywords = (parseNames(keywords) + suggestions.filter { it in picked }).distinct().joinToString(", ")
+                        suggestions = emptyList()
+                    }
+                }
                 if (role.id != 0L) PlainAction(if (confirmDelete) "確定刪除？再按一次" else "刪除此身分") {
                     if (confirmDelete) onDelete() else confirmDelete = true
                 }

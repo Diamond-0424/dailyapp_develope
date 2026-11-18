@@ -11,6 +11,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,10 +34,19 @@ fun TodoEditDialog(
     excerpt: String?,
     onDismiss: () -> Unit,
     onSave: (title: String, dueAt: Long?) -> Unit,
+    /** AI 預填中（分享進來時）。 */
+    suggesting: Boolean = false,
+    /** AI 的建議。使用者還沒改過的欄位才會被填入。 */
+    suggestion: Pair<String, Long?>? = null,
 ) {
     val zone = ZoneId.systemDefault()
     var title by remember { mutableStateOf(initialTitle) }
     var dueAt by remember { mutableStateOf(initialDueAt) }
+    LaunchedEffect(suggestion) {
+        if (suggestion == null) return@LaunchedEffect
+        if (title == initialTitle) title = suggestion.first
+        if (dueAt == initialDueAt && suggestion.second != null) dueAt = suggestion.second
+    }
 
     var picking by remember { mutableStateOf(false) }
 
@@ -63,6 +73,7 @@ fun TodoEditDialog(
         title = { Text(heading, style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (suggesting) Text("AI 整理中…", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = title, onValueChange = { title = it },
                     label = { Text("內容", style = MaterialTheme.typography.bodySmall) },

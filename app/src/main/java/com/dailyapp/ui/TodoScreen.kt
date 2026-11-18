@@ -1,5 +1,8 @@
 package com.dailyapp.ui
 
+import com.dailyapp.ai.AiAssist
+import com.dailyapp.data.AiStore
+
 import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,12 +55,25 @@ fun TodoScreen(db: AppDatabase, sharedText: String?, onSharedConsumed: () -> Uni
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     var editing by remember { mutableStateOf<Editing?>(null) }
+    var suggesting by remember { mutableStateOf(false) }
+    var suggestion by remember { mutableStateOf<Pair<String, Long?>?>(null) }
 
     // 分享進來的文字：直接開啟新增對話框
     LaunchedEffect(sharedText) {
         if (sharedText != null) {
             editing = Editing.New(sharedText)
             onSharedConsumed()
+            suggestion = null
+            if (AiStore(ctx).hasKey) {
+                suggesting = true
+                try {
+                    suggestion = AiAssist.suggestTodo(ctx, sharedText)?.let { (title, due) ->
+                        title to due?.atZone(Reminders.zone)?.toInstant()?.toEpochMilli()
+                    }
+                } finally {
+                    suggesting = false
+                }
+            }
         }
     }
 
@@ -79,7 +95,7 @@ fun TodoScreen(db: AppDatabase, sharedText: String?, onSharedConsumed: () -> Uni
         if (rows.isEmpty()) item {
             Text(
                 if (kind == TodoKind.TODO) "目前沒有待辦。\n被 @ 或被叫名字時會自動出現；也可以按「新增」，或在 LINE、Discord 長按訊息分享進來。"
-                else "關注事項會在 AI 整理功能上線後出現。",
+                else "跟你職責有關、但不必親自處理的事，AI 整理後會出現在這裡。",
                 style = MaterialTheme.typography.bodyMedium.copy(color = Ink.Secondary),
                 modifier = Modifier.padding(Space.Page),
             )
@@ -101,6 +117,9 @@ fun TodoScreen(db: AppDatabase, sharedText: String?, onSharedConsumed: () -> Uni
                     }
                 },
                 onOpenApp = { row.platform?.let { openPlatformApp(ctx, it) } },
+                onNotDone = {
+                    scope.launch { db.todos().setStatus(row.todo.id, TodoStatus.ACTIVE, System.currentTimeMillis()) }
+                },
             )
             Rule()
         }
@@ -115,6 +134,8 @@ fun TodoScreen(db: AppDatabase, sharedText: String?, onSharedConsumed: () -> Uni
                 initialTitle = firstLine,
                 initialDueAt = null,
                 excerpt = e.shared,
+                suggesting = suggesting && e.shared != null,
+                suggestion = suggestion.takeIf { e.shared != null },
                 onDismiss = { editing = null },
                 onSave = { title, due ->
                     editing = null
@@ -174,7 +195,14 @@ private fun Toggle(text: String, on: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TodoItem(row: TodoRow, onEdit: () -> Unit, onDone: () -> Unit, onDelete: () -> Unit, onOpenApp: () -> Unit) {
+private fun TodoItem(
+    row: TodoRow,
+    onEdit: () -> Unit,
+    onDone: () -> Unit,
+    onDelete: () -> Unit,
+    onOpenApp: () -> Unit,
+    onNotDone: () -> Unit,
+) {
     val t = row.todo
     val label = row.platform?.let { Platform.fromId(it)?.label ?: it }
     val now = System.currentTimeMillis()
@@ -200,12 +228,16 @@ private fun TodoItem(row: TodoRow, onEdit: () -> Unit, onDone: () -> Unit, onDel
             Text(t.excerpt, style = MaterialTheme.typography.bodyMedium, maxLines = 4)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (t.status == TodoStatus.MAYBE_DONE) Tag("可能已完成")
             if (t.status == TodoStatus.DRAFT) Tag("草稿")
+            if (t.aiGenerated) Tag("AI")
+            if (t.priority == Priority.HIGH) Tag("急")
             if (t.hasAttachment) Tag("含附件")
             t.snoozedUntil?.takeIf { it > now }?.let { Tag("延後至 " + fmtTime(it)) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            PlainAction("完成", onDone)
+            PlainAction(if (t.status == TodoStatus.MAYBE_DONE) "確認完成" else "完成", onDone)
+            if (t.status == TodoStatus.MAYBE_DONE) PlainAction("還沒", onNotDone)
             if (label != null) PlainAction("開啟 $label", onOpenApp)
             PlainAction("刪除", onDelete)
         }

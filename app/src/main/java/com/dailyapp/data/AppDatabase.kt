@@ -19,7 +19,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 @Database(
     entities = [ChatGroup::class, RawMessage::class, Todo::class, Role::class, GroupRole::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -40,7 +40,7 @@ abstract class AppDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(DbKey.passphrase(ctx))
             return Room.databaseBuilder(ctx, AppDatabase::class.java, "dailyapp.db")
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
         }
 
@@ -81,6 +81,13 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_group_roles_roleId` ON `group_roles` (`roleId`)")
             }
         }
+
+        /** v4：待辦加上 aiGenerated 標記。 */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `todos` ADD COLUMN `aiGenerated` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
     }
 }
 
@@ -96,18 +103,21 @@ object DbKey {
     fun passphrase(ctx: Context): ByteArray {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val stored = prefs.getString(PREF_BLOB, null)
-        if (stored != null) return unwrap(Base64.decode(stored, Base64.NO_WRAP))
+        if (stored != null) return KeystoreBox.unwrap(ALIAS, Base64.decode(stored, Base64.NO_WRAP))
         val raw = ByteArray(32).also { SecureRandom().nextBytes(it) }
-        prefs.edit().putString(PREF_BLOB, Base64.encodeToString(wrap(raw), Base64.NO_WRAP)).commit()
+        prefs.edit().putString(PREF_BLOB, Base64.encodeToString(KeystoreBox.wrap(ALIAS, raw), Base64.NO_WRAP)).commit()
         return raw
     }
+}
 
-    private fun key(): SecretKey {
+/** 用 Android Keystore 中不可匯出的 AES-GCM 金鑰加解密小段資料。輸出前 12 位元組為 IV。 */
+object KeystoreBox {
+    private fun key(alias: String): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        (ks.getKey(alias, null) as? SecretKey)?.let { return it }
         val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         gen.init(
-            KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
@@ -116,14 +126,14 @@ object DbKey {
         return gen.generateKey()
     }
 
-    private fun wrap(raw: ByteArray): ByteArray {
-        val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
-        return c.iv + c.doFinal(raw) // 前 12 位元組為 IV
+    fun wrap(alias: String, raw: ByteArray): ByteArray {
+        val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key(alias)) }
+        return c.iv + c.doFinal(raw)
     }
 
-    private fun unwrap(blob: ByteArray): ByteArray {
+    fun unwrap(alias: String, blob: ByteArray): ByteArray {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, blob, 0, 12))
+        c.init(Cipher.DECRYPT_MODE, key(alias), GCMParameterSpec(128, blob, 0, 12))
         return c.doFinal(blob, 12, blob.size - 12)
     }
 }

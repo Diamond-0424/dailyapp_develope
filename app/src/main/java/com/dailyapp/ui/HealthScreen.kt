@@ -89,6 +89,7 @@ fun HealthScreen(tick: Int, onAskNotify: () -> Unit) {
             }
         }
 
+        AiSection(ctx, tick)
         ReminderSection(ctx, tick)
 
         SectionLabel("通訊 App")
@@ -198,7 +199,7 @@ private fun ReminderSection(ctx: Context, tick: Int) {
 }
 
 @Composable
-private fun Note(text: String) {
+fun Note(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.bodySmall,

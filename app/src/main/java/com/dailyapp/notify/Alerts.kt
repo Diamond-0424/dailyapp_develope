@@ -15,6 +15,7 @@ import com.dailyapp.core.Platform
 import com.dailyapp.core.ReminderPlanner
 import com.dailyapp.data.ChatGroup
 import com.dailyapp.data.Todo
+import com.dailyapp.data.TodoKind
 import com.dailyapp.ui.MainActivity
 
 /** 本 App 發出的提醒。見 spec.md 5.4 通知管道。 */
@@ -103,7 +104,23 @@ object Alerts {
         )
     }
 
+    /** AI 整理出新事項時通知一次（一般管道，勿擾模式下不響）。 */
+    fun aiCreated(ctx: Context, todos: List<Todo>) {
+        if (todos.isEmpty()) return
+        val style = NotificationCompat.InboxStyle()
+        todos.take(6).forEach { style.addLine((if (it.kind == TodoKind.WATCH) "關注｜" else "") + it.title) }
+        if (todos.size > 6) style.setSummaryText("另有 ${todos.size - 6} 項")
+        post(
+            ctx, id = AI_ID, channel = CH_GENERAL,
+            title = "AI 整理出 ${todos.size} 項新事項",
+            text = todos.first().title,
+            tab = MainActivity.TAB_TODO,
+            style = style,
+        )
+    }
+
     private const val DIGEST_ID = 0x0D16E57
+    private const val AI_ID = 0x0A1A1
 
     private fun fmt(ts: Long) =
         java.text.SimpleDateFormat("M/d HH:mm", java.util.Locale.TAIWAN).format(java.util.Date(ts))
