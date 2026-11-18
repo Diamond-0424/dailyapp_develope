@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "dailyapp"
 include(":probe")
+include(":app")

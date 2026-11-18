@@ -1,0 +1,83 @@
+package com.dailyapp.data
+
+import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import java.security.KeyStore
+import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+@Database(entities = [ChatGroup::class, RawMessage::class, Todo::class], version = 1, exportSchema = false)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun groups(): GroupDao
+    abstract fun messages(): MessageDao
+    abstract fun todos(): TodoDao
+
+    companion object {
+        @Volatile private var instance: AppDatabase? = null
+
+        fun get(ctx: Context): AppDatabase = instance ?: synchronized(this) {
+            instance ?: build(ctx.applicationContext).also { instance = it }
+        }
+
+        private fun build(ctx: Context): AppDatabase {
+            System.loadLibrary("sqlcipher")
+            val factory = SupportOpenHelperFactory(DbKey.passphrase(ctx))
+            return Room.databaseBuilder(ctx, AppDatabase::class.java, "dailyapp.db")
+                .openHelperFactory(factory)
+                .build()
+        }
+    }
+}
+
+/**
+ * 資料庫密碼：隨機產生 32 位元組，以 Android Keystore 中的 AES-GCM 金鑰加密後存放。
+ * Keystore 金鑰無法匯出，所以即使有人複製了 App 的資料檔，也無法解開資料庫。
+ */
+object DbKey {
+    private const val ALIAS = "dailyapp_db_key"
+    private const val PREFS = "dbkey"
+    private const val PREF_BLOB = "wrapped"
+
+    fun passphrase(ctx: Context): ByteArray {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val stored = prefs.getString(PREF_BLOB, null)
+        if (stored != null) return unwrap(Base64.decode(stored, Base64.NO_WRAP))
+        val raw = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        prefs.edit().putString(PREF_BLOB, Base64.encodeToString(wrap(raw), Base64.NO_WRAP)).commit()
+        return raw
+    }
+
+    private fun key(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return gen.generateKey()
+    }
+
+    private fun wrap(raw: ByteArray): ByteArray {
+        val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
+        return c.iv + c.doFinal(raw) // 前 12 位元組為 IV
+    }
+
+    private fun unwrap(blob: ByteArray): ByteArray {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, blob, 0, 12))
+        return c.doFinal(blob, 12, blob.size - 12)
+    }
+}
