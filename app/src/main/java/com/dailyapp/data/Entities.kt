@@ -1,7 +1,9 @@
 package com.dailyapp.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -23,7 +25,31 @@ data class ChatGroup(
     val observedSelfName: String?,
     val firstSeenAt: Long,
     val lastSeenAt: Long,
+    /** 群組專屬的附加關鍵字，逗號分隔。只作為 AI 的提示，不用來過濾訊息。 */
+    @ColumnInfo(defaultValue = "") val extraKeywords: String = "",
 )
+
+/** 身分設定檔，例如「美宣」。與群組多對多（spec 3.2）。 */
+@Entity(tableName = "roles")
+data class Role(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    /** 職責描述，給 AI 判斷訊息與自己是否有關。 */
+    val description: String,
+    /** 關鍵字，逗號分隔。只作為 AI 的提示。 */
+    val keywords: String,
+)
+
+@Entity(
+    tableName = "group_roles",
+    primaryKeys = ["groupId", "roleId"],
+    foreignKeys = [
+        ForeignKey(entity = ChatGroup::class, parentColumns = ["id"], childColumns = ["groupId"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = Role::class, parentColumns = ["id"], childColumns = ["roleId"], onDelete = ForeignKey.CASCADE),
+    ],
+    indices = [Index("roleId")],
+)
+data class GroupRole(val groupId: String, val roleId: Long)
 
 @Entity(
     tableName = "raw_messages",

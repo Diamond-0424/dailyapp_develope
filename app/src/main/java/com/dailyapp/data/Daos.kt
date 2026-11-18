@@ -3,7 +3,9 @@ package com.dailyapp.data
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
+import androidx.room.Delete
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -17,6 +19,9 @@ interface GroupDao {
 
     @Update
     suspend fun update(g: ChatGroup)
+
+    @Query("UPDATE chat_groups SET extraKeywords = :keywords WHERE id = :id")
+    suspend fun setExtraKeywords(id: String, keywords: String)
 
     @Query(
         "SELECT * FROM chat_groups ORDER BY " +
@@ -78,4 +83,40 @@ interface TodoDao {
             "ORDER BY t.dueAt IS NULL, t.dueAt, t.createdAt DESC"
     )
     fun observeOpen(kind: TodoKind): Flow<List<TodoRow>>
+}
+
+@Dao
+interface RoleDao {
+    @Query("SELECT * FROM roles ORDER BY name")
+    fun observeAll(): Flow<List<Role>>
+
+    @Query("SELECT * FROM roles ORDER BY name")
+    suspend fun all(): List<Role>
+
+    @Insert
+    suspend fun insert(r: Role): Long
+
+    @Update
+    suspend fun update(r: Role)
+
+    @Delete
+    suspend fun delete(r: Role)
+
+    @Query("SELECT * FROM group_roles")
+    fun observeLinks(): Flow<List<GroupRole>>
+
+    @Query("SELECT r.* FROM roles r JOIN group_roles gr ON gr.roleId = r.id WHERE gr.groupId = :groupId ORDER BY r.name")
+    suspend fun rolesOf(groupId: String): List<Role>
+
+    @Query("DELETE FROM group_roles WHERE groupId = :groupId")
+    suspend fun clearLinks(groupId: String)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertLinks(links: List<GroupRole>)
+
+    @Transaction
+    suspend fun setGroupRoles(groupId: String, roleIds: Collection<Long>) {
+        clearLinks(groupId)
+        insertLinks(roleIds.map { GroupRole(groupId, it) })
+    }
 }

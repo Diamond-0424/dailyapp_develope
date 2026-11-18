@@ -17,11 +17,16 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-@Database(entities = [ChatGroup::class, RawMessage::class, Todo::class], version = 2, exportSchema = false)
+@Database(
+    entities = [ChatGroup::class, RawMessage::class, Todo::class, Role::class, GroupRole::class],
+    version = 3,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun groups(): GroupDao
     abstract fun messages(): MessageDao
     abstract fun todos(): TodoDao
+    abstract fun roles(): RoleDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -35,7 +40,7 @@ abstract class AppDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(DbKey.passphrase(ctx))
             return Room.databaseBuilder(ctx, AppDatabase::class.java, "dailyapp.db")
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
         }
 
@@ -56,6 +61,24 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `todos_new` RENAME TO `todos`")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_todos_groupId` ON `todos` (`groupId`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_todos_status` ON `todos` (`status`)")
+            }
+        }
+
+        /** v3：身分設定檔（roles、group_roles）與群組附加關鍵字。 */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `chat_groups` ADD COLUMN `extraKeywords` TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `roles` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`name` TEXT NOT NULL, `description` TEXT NOT NULL, `keywords` TEXT NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `group_roles` (`groupId` TEXT NOT NULL, `roleId` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`groupId`, `roleId`), " +
+                        "FOREIGN KEY(`groupId`) REFERENCES `chat_groups`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                        "FOREIGN KEY(`roleId`) REFERENCES `roles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_group_roles_roleId` ON `group_roles` (`roleId`)")
             }
         }
     }

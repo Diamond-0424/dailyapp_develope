@@ -13,14 +13,15 @@ Android App（Kotlin + Jetpack Compose），透過 `NotificationListenerService`
 |---|---|---|
 | M0 真機驗證 | ✅ 完成 | 探針 App 在 `probe/`；驗證結果記在 spec 2.1.1 |
 | M1 監聽、白名單、@ 待辦 | ✅ 完成，已 commit `4626ba8` | LINE 依使用者要求**未實測** |
-| M2 AI 整理 | 🟡 **進行中**，拆成 M2a／M2b／M2c | M2a：身分設定檔、個資處理（不需 API key）。M2b：API key 輸入、每小時整理、合併。M2c：費用上限。API key 由使用者在 App 內輸入，不要讓他貼到對話裡 |
+| M2 AI 整理 | 🟡 **進行中**：M2a ✅；M2b 進行中；M2c 未開始 | M2a：身分設定檔、個資處理（不需 API key）。M2b：API key 輸入、每小時整理、合併。M2c：費用上限。API key 由使用者在 App 內輸入，不要讓他貼到對話裡 |
 | M3 提醒系統 | ✅ 完成，使用者實測通過 | 時間選擇改用自製滾輪 `ui/WheelPicker.kt`（使用者不要內建轉盤）；App 圖示來自根目錄的 `極簡鈴鐺待辦圖示.png`（未進 repo） |
 | M4 加密備份、發布流程 | 未開始 | |
 
 ## 立即待辦（接手後先做）
 
-1. 進行 M2a：身分設定檔（Role、GroupRole）、送 AI 前的個資遮蔽與成員代稱（純 Kotlin，寫單元測試）。規格見 spec 3.2、4.3。
-2. M2b 動工前先讀 `claude-api` skill 確認模型 ID 與 API 用法。
+1. 進行 M2b：API key 輸入、每小時 AI 整理、合併待辦、疑似完成。動工前先讀 `claude-api` skill 確認模型 ID 與 API 用法。
+2. M2a 已完成：`core/Privacy.kt`（Redactor、Pseudonymizer、Sanitizer）；身分在群組頁上方管理；DB v3。
+3. 「新增身分時 AI 建議同義詞」留到 M2b。
 
 ## 程式結構（`app/`，package `com.dailyapp`）
 
@@ -28,6 +29,7 @@ Android App（Kotlin + Jetpack Compose），透過 `NotificationListenerService`
   - `Model.kt`：Platform、ParsedMessage、訊息雜湊
   - `MentionDetector.kt`：先做 NFKC 正規化，並移除格式字元
   - `ReminderPlanner.kt`：提醒時間的計算
+  - `Privacy.kt`：送 AI 前的個資遮蔽與成員代稱
 - `data/`：
   - Room + SQLCipher。密碼用 Keystore 的 AES-GCM 金鑰包裝
   - Entities、DAOs、`Repository.ingest()`（去重、白名單、點名後建立草稿待辦）
@@ -41,7 +43,7 @@ Android App（Kotlin + Jetpack Compose），透過 `NotificationListenerService`
   - `Theme.kt`：黑白極簡風格與 Noto Serif TC 字型，沿用使用者 create-pdf skill 的預設風格
   - 各畫面：Todo、Group、Health（介面上叫「狀態」）、TodoEditDialog
   - `WheelPicker.kt`：滾輪選擇器與日期時間對話框，分鐘以 5 分為單位
-- 測試：`app/src/test/...`，目前 25 個，全部通過。
+- 測試：`app/src/test/...`，目前 39 個，全部通過。
 
 其他目錄：
 - `probe/`：M0 探針 App（`com.dailyapp.probe`），手機上仍安裝著，通知存取權也還開著。
